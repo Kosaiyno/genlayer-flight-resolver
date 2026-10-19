@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "project": "FlightResolver",
+  "track": "Builder -> Intelligent Contracts",
+  "description": "Autonomous On-Chain Travel Disruption & Flight Rebooking Arbiter with contract-side authoritative evidence acquisition",
+  "network": {
+    "name": "StudioNet",
+    "chain_id": 61999,
+    "rpc": "https://studio.genlayer.com/api",
+    "explorer": "https://explorer-studio.genlayer.com"
+  },
+  "runner": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6",
+  "contract": {
+    "name": "FlightResolver",
+    "file": "contracts/flight_resolver.py",
+    "address": "0x36f51b3Bf168880A2fb1EDf986c3f919Ddc1CA72",
+    "explorer_url": "https://explorer-studio.genlayer.com/address/0x36f51b3Bf168880A2fb1EDf986c3f919Ddc1CA72",
+    "deploy_tx": "0xef3ac9265daedeec5543108601c3f65113539aa034a1aec554dfc1d9b78022c5"
+  },
+  "evidence_sources": {
+    "repository": "https://github.com/kosaiyno/genlayer-flight-resolver",
+    "honest_rebooking_flight": "https://raw.githubusercontent.com/kosaiyno/genlayer-flight-resolver/main/evidence/honest_rebooking_flight.json",
+    "delayed_missed_deadline_flight": "https://raw.githubusercontent.com/kosaiyno/genlayer-flight-resolver/main/evidence/delayed_missed_deadline_flight.json",
+    "phantom_unsafe_connection_flight": "https://raw.githubusercontent.com/kosaiyno/genlayer-flight-resolver/main/evidence/phantom_unsafe_connection_flight.json"
+  },
+  "transactions": [
+    {
+      "step": 1,
+      "method": "deploy",
+      "description": "Deploy FlightResolver on StudioNet",
+      "tx_hash": "0xef3ac9265daedeec5543108601c3f65113539aa034a1aec554dfc1d9b78022c5",
+      "status": "FINALIZED",
+      "consensus_state": "FINALIZED",
+      "execution_result": "SUCCESS",
+      "explorer_url": "https://explorer-studio.genlayer.com/tx/0xef3ac9265daedeec5543108601c3f65113539aa034a1aec554dfc1d9b78022c5"
+    },
+    {
+      "step": 2,
+      "method": "register_journey",
+      "description": "Register Journey 1: LHR->JFK, arrival deadline 2026-11-05T18:30:00Z, max cost $200, min layover 60m",
+      "tx_hash": "0xae32a9e071dad9e00bf49ac549a32af48724ce37a095f3e6b627ffd05306ac5a",
+      "status": "FINALIZED",
+      "consensus_state": "FINALIZED",
+      "execution_result": "SUCCESS",
+      "explorer_url": "https://explorer-studio.genlayer.com/tx/0xae32a9e071dad9e00bf49ac549a32af48724ce37a095f3e6b627ffd05306ac5a"
+    },
+    {
+      "step": 3,
+      "method": "propose_rebooking_option",
+      "description": "Propose BA177 with authoritative flight evidence URL for Journey 1",
+      "tx_hash": "0x68961bec93156ca370d171937d2a52052a9077eba326e04254c60284e270a53b",
+      "status": "FINALIZED",
+      "consensus_state": "FINALIZED",
+      "execution_result": "SUCCESS",
+      "explorer_url": "https://explorer-studio.genlayer.com/tx/0x68961bec93156ca370d171937d2a52052a9077eba326e04254c60284e270a53b"
+    },
+    {
+      "step": 4,
+      "method": "adjudicate_rebooking",
+      "description": "Adjudicate Proposal 1: Contract independently fetches flight feed, verifies arrival at 16:15Z (2h15m before deadline) and $150 fare, extracts verbatim quote, outputs QUALIFIED",
+      "tx_hash": "0x4ef59fbae0ee630bc384f133127ec4e342a7878cab433f9b4074df1e0daa40fd",
+      "status": "FINALIZED",
+      "consensus_state": "FINALIZED",
+      "execution_result": "SUCCESS",
+      "verdict": "QUALIFIED",
+      "verbatim_quote": "\"arrival_time_iso\": \"2026-11-05T16:15:00Z\"",
+      "explorer_url": "https://explorer-studio.genlayer.com/tx/0x4ef59fbae0ee630bc384f133127ec4e342a7878cab433f9b4074df1e0daa40fd"
+    },
+    {
+      "step": 5,
+      "method": "confirm_rebooking",
+      "description": "Confirm qualified rebooking on Journey 1, transitioning journey to RESOLVED and proposal to CONFIRMED",
+      "tx_hash": "0x0d950aea884235c878e8902bb4bbbe8f9b009c3a6eb96999f8750091daa505ca",
+      "status": "FINALIZED",
+      "consensus_state": "FINALIZED",
+      "execution_result": "SUCCESS",
+      "resulting_journey_status": "RESOLVED",
+      "resulting_proposal_status": "CONFIRMED",
+      "explorer_url": "https://explorer-studio.genlayer.com/tx/0x0d950aea884235c878e8902bb4bbbe8f9b009c3a6eb96999f8750091daa505ca"
+    },
+    {
+      "step": 6,
+      "method": "register_journey",
+      "description": "Register Journey 2: LHR->JFK, arrival deadline 18:30Z, min layover 60m (For Abuse Defense Demo)",
+      "tx_hash": "0x678983a43bbd66150e28338193b1ebe46ffaa73656e5bbe3c7c509216b0e9505",
+      "status": "FINALIZED",
+      "consensus_state": "FINALIZED",
+      "execution_result": "SUCCESS",
+      "explorer_url": "https://explorer-studio.genlayer.com/tx/0x678983a43bbd66150e28338193b1ebe46ffaa73656e5bbe3c7c509216b0e9505"
+    },
+    {
+      "step": 7,
+      "method": "propose_rebooking_option",
+      "description": "Adversarial proposal: Agent claims viable flight, but authoritative feed reveals unsafe 25-minute connection",
+      "tx_hash": "0xa8ced6adb2ac8886b588cb350234f775f7cc9e6be304242b5c3d31908b272cc4",
+      "status": "FINALIZED",
+      "consensus_state": "FINALIZED",
+      "execution_result": "SUCCESS",
+      "explorer_url": "https://explorer-studio.genlayer.com/tx/0xa8ced6adb2ac8886b588cb350234f775f7cc9e6be304242b5c3d31908b272cc4"
+    },
+    {
+      "step": 8,
+      "method": "adjudicate_rebooking",
+      "description": "ADVERSARIAL ABUSE INTERCEPTED: Contract fetches flight feed, catches 25-minute connection below 60m safety floor, extracts verbatim quote, deterministic clamp enforces DISQUALIFIED",
+      "tx_hash": "0xd2f7e73ef8b630d35162345304450fbcc9c34ba03db995998480bad50bba04c1",
+      "status": "FINALIZED",
+      "consensus_state": "FINALIZED",
+      "execution_result": "SUCCESS",
+      "verdict": "DISQUALIFIED",
+      "expected_failure_label": "ADVERSARIAL_UNSAFE_LAYOVER_BLOCKED",
+      "verbatim_quote": "\"layover_minutes\": 25",
+      "explorer_url": "https://explorer-studio.genlayer.com/tx/0xd2f7e73ef8b630d35162345304450fbcc9c34ba03db995998480bad50bba04c1"
+    }
+  ]
+}

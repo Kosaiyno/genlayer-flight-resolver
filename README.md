@@ -1,192 +1,83 @@
-# FlightResolver — Autonomous Travel Disruption Resolution Contract
+# FlightResolver — Autonomous On-Chain Travel Disruption & Flight Rebooking Arbiter
 
-[![GenLayer Intelligent Contract](https://img.shields.io/badge/GenLayer-Intelligent%20Contract-blue.svg)](https://genlayer.com)
-[![Consensus](https://img.shields.io/badge/Consensus-Equivalence%20Principle-green.svg)](https://docs.genlayer.com)
-[![Tests](https://img.shields.io/badge/Tests-11%20Passed-brightgreen.svg)](tests/test_flight_resolver.py)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+> **GenLayer Builder Track**: Intelligent Contracts  
+> **Network**: GenLayer StudioNet (Chain ID: `61999`)  
+> **Runtime**: `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6`  
+> **Deployed Contract (StudioNet)**: [`0x36f51b3Bf168880A2fb1EDf986c3f919Ddc1CA72`](https://explorer-studio.genlayer.com/address/0x36f51b3Bf168880A2fb1EDf986c3f919Ddc1CA72)
 
-An autonomous on-chain travel disruption arbiter and flight rebooking primitive built on GenLayer. `FlightResolver` enables travel management systems, airlines, and autonomous passenger agents to handle flight cancellations, diversions, and missed connections by adjudicating replacement flight proposals against strict traveler priorities under the GenLayer Equivalence Principle.
+An autonomous on-chain travel disruption resolution and rebooking arbiter built on GenLayer. `FlightResolver` protects corporate travel managers, passengers, and autonomous travel agents from hallucinations, missed arrival deadlines, hidden fare surges, and dangerously tight connection layovers during flight disruptions.
 
----
-
-## The Problem in Autonomous Travel
-
-When a commercial flight is cancelled or severely delayed, rebooking algorithms face conflicting constraints:
-
-1. **The Naive Algorithm Flaw**: Choosing the cheapest replacement often results in flights landing past an essential business meeting deadline or routing through an impossible 25-minute connection across international terminals.
-2. **The EVM Limitation**: Traditional smart contracts cannot reason about contextual trade-offs—such as whether a \$180 direct flight arriving before 6:00 PM is preferable to a \$120 multi-stop flight arriving at midnight with an unsafe layover.
-3. **The Agent Challenge**: Automated travel bots need an on-chain policy arbiter that prevents unauthorized budget overruns while maintaining schedule feasibility without requiring human panic in the airport terminal.
+Unlike contracts that trust caller-supplied flight schedule arguments, `FlightResolver` **independently acquires and validates authoritative flight feeds on-chain** using `gl.nondet.web.get()`, extracts mandatory verbatim quote evidence under the Equivalence Principle (`gl.eq_principle.prompt_non_comparative`), and enforces deterministic safety clamps in code.
 
 ---
 
-## The Solution: FlightResolver
-
-`FlightResolver` provides an on-chain policy arbiter and escrow primitive:
+## 1. Architecture & Verification Flow
 
 ```mermaid
-flowchart TD
-    Traveller([Traveller / Travel Desk]) -->|1. register_journey| FR[FlightResolver Contract]
-    AirlineOrAgent([Airline / Travel Agent]) -->|2. report_disruption| FR
-    AirlineOrAgent -->|3. propose_rebooking_option| FR
-    FR -->|4. adjudicate_rebooking| Consensus{GenLayer Equivalence Consensus}
-    Consensus -->|Meets deadline & safe layover| Qualified[QUALIFIED]
-    Consensus -->|Feasible but tight layover| Borderline[BORDERLINE_REVIEW]
-    Consensus -->|Past deadline or over-budget| Disqualified[DISQUALIFIED]
-    Qualified -->|5. confirm_rebooking| Resolved[RESOLVED / CONFIRMED]
-    Borderline -->|Traveller sovereign choice| TravellerOverride{traveller_override}
-    TravellerOverride -->|Approve| Qualified
-    TravellerOverride -->|Reject| Disqualified
+sequenceDiagram
+    autonumber
+    actor Traveller as Business Traveller
+    actor Agent as Autonomous Travel Agent
+    participant FR as FlightResolver (Intelligent Contract)
+    participant Feed as Authoritative Flight Feed (GDS / Airline API)
+    participant Val as GenLayer AI Validators
+
+    Traveller->>FR: register_journey(origin, dest, deadline_iso, max_extra_cost, max_stops, min_layover, priority)
+    Note over FR: Journey State: DISRUPTED
+    Agent->>FR: propose_rebooking_option(journey_id, flight_code, airline, flight_evidence_url, claimed_fare)
+    Note over FR: Proposal State: PROPOSED
+    Traveller->>FR: adjudicate_rebooking(journey_id, proposal_id)
+    FR->>Feed: Independent Fetch via gl.nondet.web.get(flight_evidence_url)
+    Feed-->>FR: Raw Flight Schedule & Booking Payload
+    FR->>Val: Equivalence Principle Prompt (Extract verbatim quotes, arrival ISO, fare, layover, availability)
+    Val-->>FR: Consensus Verdict (QUALIFIED / BORDERLINE_REVIEW / DISQUALIFIED)
+    Note over FR: Deterministic Clamps Verify Deadline, Budget, Layover Floor & Quotes
+    Note over FR: Proposal State Flipped to QUALIFIED or DISQUALIFIED
+    Traveller->>FR: confirm_rebooking(journey_id, proposal_id)
+    Note over FR: Journey Flipped to RESOLVED, Proposal to CONFIRMED
 ```
 
 ---
 
-## Key Features
+## 2. Live On-Chain Deployments & Verified StudioNet Manifest
 
-1. **Journey Constraint Registration**: Passengers specify route (`origin`, `destination`), hard arrival deadline (`arrival_deadline_iso`), maximum added cost (`max_extra_cost_cents`), maximum allowed stops (`max_stops`), minimum layover safety buffer (`min_layover_mins`), and priority mode (`SPEED_FIRST`, `COMFORT_FIRST`, `BUDGET_FIRST`).
-2. **Disruption Ingestion**: Journeys transition to `DISRUPTED` upon verified cancellations, extreme delays, or diversions.
-3. **Multi-Candidate Evaluation**: Airlines and autonomous procurement agents submit rebooking proposals with departure/arrival times, layover details, and booking links.
-4. **Subjective Equivalence Principle Adjudication**: GenLayer validators independently evaluate connection feasibility and deadline compliance to reach consensus on:
-   - **`QUALIFIED`**: Meets or beats arrival deadline, safe connections, within cost limit.
-   - **`BORDERLINE_REVIEW`**: Feasible alternative with tight connections or minor preference trade-offs requiring passenger consent.
-   - **`DISQUALIFIED`**: Misses deadline, exceeds cost ceiling, or has unsafe connection times.
-5. **Deterministic Budget Clamp**: Invariant protection ensures no proposal exceeding the authorized extra cost ceiling can ever be marked `QUALIFIED`.
-6. **Sovereign Passenger Overrides**: Passengers can approve borderline options or confirm qualified bookings.
+All transactions below were executed under full multi-validator consensus on StudioNet (Chain ID: `61999`):
 
----
+| Step | Method | Tx Hash | Result & Consensus State |
+| :---: | :--- | :--- | :--- |
+| **1** | `deploy` | [`0xef3ac9265d...`](https://explorer-studio.genlayer.com/tx/0xef3ac9265daedeec5543108601c3f65113539aa034a1aec554dfc1d9b78022c5) | **FINALIZED** (Contract deployed at `0x36f5...CA72`) |
+| **2** | `register_journey` (Journey 1) | [`0xae32a9e071...`](https://explorer-studio.genlayer.com/tx/0xae32a9e071dad9e00bf49ac549a32af48724ce37a095f3e6b627ffd05306ac5a) | **FINALIZED** (LHR $\rightarrow$ JFK, deadline 18:30Z, min layover 60m) |
+| **3** | `propose_rebooking_option` (J1) | [`0x68961bec93...`](https://explorer-studio.genlayer.com/tx/0x68961bec93156ca370d171937d2a52052a9077eba326e04254c60284e270a53b) | **FINALIZED** (Proposed BA177 with authoritative feed URL) |
+| **4** | `adjudicate_rebooking` (J1) | [`0x4ef59fbae0...`](https://explorer-studio.genlayer.com/tx/0x4ef59fbae0ee630bc384f133127ec4e342a7878cab433f9b4074df1e0daa40fd) | **FINALIZED**: `QUALIFIED`<br>Verified arrival 16:15Z (2h15m before deadline), $150 fare, 0 stops<br>Quote: `"\"arrival_time_iso\": \"2026-11-05T16:15:00Z\""` |
+| **5** | `confirm_rebooking` (J1) | [`0x0d950aea88...`](https://explorer-studio.genlayer.com/tx/0x0d950aea884235c878e8902bb4bbbe8f9b009c3a6eb96999f8750091daa505ca) | **FINALIZED**: State transitioned to `RESOLVED` / `CONFIRMED` |
+| **6** | `register_journey` (Journey 2) | [`0x678983a43b...`](https://explorer-studio.genlayer.com/tx/0x678983a43bbd66150e28338193b1ebe46ffaa73656e5bbe3c7c509216b0e9505) | **FINALIZED** (For abuse defense demonstration) |
+| **7** | `propose_rebooking_option` (J2) | [`0xa8ced6adb2...`](https://explorer-studio.genlayer.com/tx/0xa8ced6adb2ac8886b588cb350234f775f7cc9e6be304242b5c3d31908b272cc4) | **FINALIZED** (Adversarial proposal: AF1128 with 25-minute connection) |
+| **8** | `adjudicate_rebooking` (J2) | [`0xd2f7e73ef8...`](https://explorer-studio.genlayer.com/tx/0xd2f7e73ef8b630d35162345304450fbcc9c34ba03db995998480bad50bba04c1) | **FINALIZED**: `DISQUALIFIED`<br>**Abuse Intercepted**: Caught 25-minute layover below 60m floor<br>Quote: `"\"layover_minutes\": 25"` |
 
-## Contract State Machine
-
-```
-[SCHEDULED] ──(report_disruption)──> [DISRUPTED]
-                                           │
-                              (propose_rebooking_option)
-                                           │
-                                  (adjudicate_rebooking)
-                                           │
-                  ┌────────────────────────┼────────────────────────┐
-                  ▼                        ▼                        ▼
-             [QUALIFIED]          [BORDERLINE_REVIEW]        [DISQUALIFIED]
-                  │                        │
-          (confirm_rebooking)      (traveller_override)
-                  │                        │
-                  ▼                        ▼
-              [RESOLVED]         [QUALIFIED] / [DISQUALIFIED]
-```
+Full transaction parameters and read-back states are documented in [`deploy/proof.json`](file:///C:/Users/user/Desktop/genlayer-flight-resolver/deploy/proof.json).
 
 ---
 
-## Contract Methods Specification
+## 3. Four Deterministic Safety Clamps
 
-### Write Methods
-
-| Method | Parameters | Description |
-| :--- | :--- | :--- |
-| `register_journey` | `origin: str, destination: str, arrival_deadline_iso: str, max_extra_cost_cents: int, max_stops: int, min_layover_mins: int, priority_mode: str` | Registers passenger travel constraints and returns `journey_id` (`u256`). |
-| `report_disruption` | `journey_id: int, original_flight_code: str, disruption_type: str, reason: str` | Transitions journey to `DISRUPTED` upon cancellation or delay. |
-| `propose_rebooking_option` | `journey_id: int, flight_code: str, airline: str, departure_iso: str, arrival_iso: str, stops: int, layover_details: str, added_cost_cents: int, booking_url: str` | Submits a candidate replacement flight for an active disruption. Returns `proposal_id` (`u256`). |
-| `adjudicate_rebooking` | `journey_id: int, proposal_id: int` | Executes GenLayer Equivalence Principle consensus across validators to evaluate schedule feasibility and layover safety. |
-| `confirm_rebooking` | `journey_id: int, proposal_id: int` | Confirms a `QUALIFIED` replacement flight and marks journey as `RESOLVED`. |
-| `traveller_override` | `journey_id: int, proposal_id: int, approve: bool` | Allows the registered traveler to approve or reject a `BORDERLINE_REVIEW` flight option. |
-| `cancel_journey` | `journey_id: int` | Cancels an unfulfilled journey. Callable by the traveler or contract owner. |
-
-### View Methods
-
-| Method | Returns | Description |
-| :--- | :--- | :--- |
-| `get_journey(journey_id)` | `str` (JSON) | Retrieves the full journey constraints and disruption record. |
-| `get_proposal(proposal_id)` | `str` (JSON) | Retrieves the proposed flight details and rebooking terms. |
-| `get_adjudication(proposal_id)` | `str` (JSON) | Retrieves the consensus evaluation result and feasibility score. |
-| `get_journey_status(journey_id)` | `str` | Returns the journey status (`SCHEDULED`, `DISRUPTED`, `RESOLVED`, `CANCELLED`). |
-| `get_proposal_status(proposal_id)` | `str` | Returns proposal status (`PROPOSED`, `QUALIFIED`, `BORDERLINE_REVIEW`, `DISQUALIFIED`, `CONFIRMED`). |
-| `get_total_journeys()` | `u256` | Returns total registered journeys. |
-| `get_total_proposals()` | `u256` | Returns total submitted proposals. |
-| `get_resolver_stats()` | `str` | Summarizes owner and registry statistics. |
+1. **Independent Authoritative Acquisition**: Contract fetches flight schedules directly via `gl.nondet.web.get()`. Never relies on caller-supplied arrival times or fares.
+2. **Mandatory Verbatim Quoting**: AI validators must extract an exact substring from the fetched airline payload. If missing, contract clamps to `DISQUALIFIED`.
+3. **Hard Arrival Deadline Clamp**: If arrival lands after `arrival_deadline_iso`, contract forcefully clamps to `DISQUALIFIED`.
+4. **Layover Safety Floor Clamp**: If connection time is under `min_layover_mins`, contract forcefully clamps to `DISQUALIFIED`.
 
 ---
 
-## Consensus Design & Rotation Safety
-
-GenLayer contracts execute in an environment of heterogeneous AI validators. To guarantee unanimous consensus on **Rotation 0** without triggering validator divergence or `Undetermined` states:
-
-1. **Objective, Positive Equivalence Criteria**: Criteria are framed constructively (`"If the flight arrives before the deadline within budget with safe connections, decision is QUALIFIED"`), avoiding contradictory negative rules.
-2. **Standardized JSON Schema**: Validators emit `decision`, `feasibility_score`, `deadline_met`, `budget_met`, and `rationale`.
-3. **Format Sanitization**: Built-in regex and bracket parsing cleanly sanitizes markdown code fences (` ```json `) emitted by diverse validator models.
-4. **Deterministic Invariant Enforcement**: Critical invariants (such as budget overruns) are mathematically verified in code, ensuring zero economic risk regardless of model nuance.
-
----
-
-## Local Verification & Testing
-
-The repository contains an automated test suite verifying all state transitions, boundary validations, access controls, and safety clamps without external network dependencies.
-
-### Run Tests:
+## 4. Local Testing & Verification
 
 ```bash
-python tests/test_flight_resolver.py
+uv run python -m unittest discover -s tests
 ```
 
-### Test Suite Coverage:
-- `test_initialization`: Verifies initial zero-state and owner binding.
-- `test_register_journey_success`: Verifies valid journey creation.
-- `test_register_journey_validations`: Tests negative costs, empty strings, and invalid modes.
-- `test_report_disruption`: Tests transition from `SCHEDULED` to `DISRUPTED`.
-- `test_propose_and_adjudicate_qualified_and_confirm`: Full lifecycle from disruption to `QUALIFIED` and `RESOLVED`.
-- `test_adjudicate_deadline_breach_disqualified`: Verifies rejection when arrival lands past deadline.
-- `test_adjudicate_budget_clamp_disqualified`: Enforces rejection when proposed cost exceeds budget.
-- `test_adjudicate_borderline_and_traveller_override`: Tests human-in-the-loop escalation.
-- `test_cancel_journey_access_control`: Ensures unauthorized callers cannot cancel journeys.
-- `test_markdown_wrapped_response_sanitization`: Verifies parsing of markdown code fences.
-- `test_nonexistent_ids`: Verifies robust error handling on missing IDs.
+Output:
+```
+........
+----------------------------------------------------------------------
+Ran 8 tests in 0.001s
 
----
-
-## GenLayer Studio Deployment Guide
-
-1. Navigate to the **[GenLayer Studio](https://studio.genlayer.com/)**.
-2. Create a new contract file (e.g., `flight_resolver.py`) and paste the contents of `contracts/flight_resolver.py`.
-3. Click **Deploy**.
-4. Test execution on-chain:
-   - Call `register_journey`:
-     ```json
-     {
-       "origin": "LHR",
-       "destination": "JFK",
-       "arrival_deadline_iso": "2026-10-15T18:00:00Z",
-       "max_extra_cost_cents": 20000,
-       "max_stops": 1,
-       "min_layover_mins": 60,
-       "priority_mode": "SPEED_FIRST"
-     }
-     ```
-   - Call `report_disruption`:
-     ```json
-     {
-       "journey_id": 1,
-       "original_flight_code": "VS003",
-       "disruption_type": "CANCELLED",
-       "reason": "Engine mechanical issue"
-     }
-     ```
-   - Call `propose_rebooking_option`:
-     ```json
-     {
-       "journey_id": 1,
-       "flight_code": "BA177",
-       "airline": "British Airways",
-       "departure_iso": "2026-10-15T13:00:00Z",
-       "arrival_iso": "2026-10-15T16:00:00Z",
-       "stops": 0,
-       "layover_details": "Direct non-stop flight",
-       "added_cost_cents": 15000,
-       "booking_url": "https://ba.com/booking/177"
-     }
-     ```
-   - Call `adjudicate_rebooking(1, 1)` to trigger GenLayer validator consensus.
-   - Inspect proposal status via `get_proposal_status(1)` (`QUALIFIED`).
-   - Call `confirm_rebooking(1, 1)` to confirm the flight (`RESOLVED`).
-
----
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
+OK
+```
