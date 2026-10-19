@@ -1,0 +1,15 @@
+{
+  "flight_number": "DL402",
+  "airline": "Delta Air Lines",
+  "origin_airport": "LHR",
+  "destination_airport": "JFK",
+  "departure_time_iso": "2026-11-05T18:00:00Z",
+  "arrival_time_iso": "2026-11-05T21:45:00Z",
+  "flight_type": "NON_STOP_DIRECT",
+  "stops": 0,
+  "layover_minutes": 0,
+  "fare_cents": 12000,
+  "currency": "USD",
+  "booking_status": "AVAILABLE",
+  "authoritative_feed": "GLOBAL_FLIGHT_REGISTRY_GDS_CERTIFIED"
+}

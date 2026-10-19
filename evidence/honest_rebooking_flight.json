@@ -1,0 +1,15 @@
+{
+  "flight_number": "BA177",
+  "airline": "British Airways",
+  "origin_airport": "LHR",
+  "destination_airport": "JFK",
+  "departure_time_iso": "2026-11-05T13:00:00Z",
+  "arrival_time_iso": "2026-11-05T16:15:00Z",
+  "flight_type": "NON_STOP_DIRECT",
+  "stops": 0,
+  "layover_minutes": 0,
+  "fare_cents": 15000,
+  "currency": "USD",
+  "booking_status": "AVAILABLE",
+  "authoritative_feed": "GLOBAL_FLIGHT_REGISTRY_GDS_CERTIFIED"
+}

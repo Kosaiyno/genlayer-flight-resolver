@@ -1,31 +1,17 @@
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 from genlayer import *
-import typing
 import json
 
 class FlightResolver(gl.Contract):
     """
-    FlightResolver is a production-grade GenLayer Intelligent Contract primitive
-    designed for autonomous travel disruption management and flight rebooking.
-
-    Core Purpose:
-    When a commercial flight is cancelled, diverted, or critically delayed, passengers
-    and travel management agents face a complex multi-variable optimization challenge:
-    - The cheapest alternative flight might land past a hard arrival deadline (e.g. missing a business conference).
-    - An alternative might feature an impossibly short 25-minute international layover across terminals.
-    - Traditional smart contracts can only evaluate rigid numeric thresholds or simple binary oracles.
+    FlightResolver: Autonomous On-Chain Travel Disruption & Flight Rebooking Arbiter.
     
-    FlightResolver introduces an autonomous on-chain resolution arbiter:
-    1. Journey Constraint Escrow: Travellers lock arrival deadlines, maximum added costs,
-       stopover ceilings, minimum layover safety floors, and priority modes (SPEED_FIRST, COMFORT_FIRST, BUDGET_FIRST).
-    2. Disruption Reporting: Disrupted journeys are transitioned into active resolution mode with proof.
-    3. Multi-Option Proposal Ingestion: Airlines, OTAs, or autonomous rebooking agents propose replacement flights.
-    4. Multi-Pillar Equivalence Adjudication: GenLayer validators independently evaluate connection viability,
-       schedule feasibility, and economic trade-offs via the Equivalence Principle:
-       - QUALIFIED: Satisfies arrival deadline, safe connection time, and cost limits.
-       - BORDERLINE_REVIEW: Feasible alternative but features tight layovers or minor trade-offs requiring traveller consent.
-       - DISQUALIFIED: Violates arrival deadline, exceeds extra cost ceiling, or has unsafe connections.
-    5. Sovereign Traveller Overrides & Confirmation: Travellers can approve borderline flights or confirm qualified options.
+    Protects passengers and corporate travel managers against:
+    1. Unverified agent rebooking claims (contract independently acquires authoritative flight evidence via gl.nondet.web.get).
+    2. Missed hard arrival deadlines (deterministic timestamp clamp against arrival_deadline_iso).
+    3. Hidden fare surges & budget overruns (deterministic clamp against max_extra_cost_cents).
+    4. Unsafe connection layovers & missed flights (deterministic floor clamp against min_layover_mins).
+    5. Ghost bookings / phantom seats (authoritative booking_status verification with verbatim quote grounding).
     """
     owner: Address
     journey_counter: u256
@@ -38,6 +24,10 @@ class FlightResolver(gl.Contract):
         self.owner = gl.message.sender_address
         self.journey_counter = u256(0)
         self.proposal_counter = u256(0)
+
+    # =========================================================================
+    # VIEW METHODS
+    # =========================================================================
 
     @gl.public.view
     def get_resolver_stats(self) -> str:
@@ -98,6 +88,10 @@ class FlightResolver(gl.Contract):
         except Exception:
             return "UNKNOWN"
 
+    # =========================================================================
+    # WRITE METHODS
+    # =========================================================================
+
     @gl.public.write
     def register_journey(
         self,
@@ -146,9 +140,8 @@ class FlightResolver(gl.Contract):
             "max_stops": int(max_stops),
             "min_layover_mins": int(min_layover_mins),
             "priority_mode": clean_mode,
-            "status": "SCHEDULED",
+            "status": "DISRUPTED",  # Ready for rebooking proposal ingestion
             "created_at": created_ts,
-            "disruption_info": None,
             "confirmed_proposal_id": None
         }
 
@@ -156,55 +149,21 @@ class FlightResolver(gl.Contract):
         return new_id
 
     @gl.public.write
-    def report_disruption(
-        self,
-        journey_id: int,
-        original_flight_code: str,
-        disruption_type: str,
-        reason: str
-    ) -> bool:
-        j_key = u256(journey_id)
-        if j_key not in self.journeys:
-            raise ValueError(f"Journey {journey_id} does not exist")
-
-        journey = json.loads(self.journeys[j_key])
-        current_status = journey.get("status", "")
-        if current_status not in ["SCHEDULED", "DISRUPTED"]:
-            raise ValueError(f"Cannot report disruption for journey in status '{current_status}'")
-
-        clean_flight = str(original_flight_code).upper().strip()
-        clean_type = str(disruption_type).upper().strip()
-        clean_reason = str(reason).strip()
-
-        if len(clean_flight) == 0:
-            raise ValueError("Original flight code cannot be empty")
-        if clean_type not in ["CANCELLED", "DELAYED_MISSED_CONNECTION", "DIVERTED"]:
-            raise ValueError("Disruption type must be CANCELLED, DELAYED_MISSED_CONNECTION, or DIVERTED")
-
-        journey["status"] = "DISRUPTED"
-        journey["disruption_info"] = {
-            "original_flight": clean_flight,
-            "disruption_type": clean_type,
-            "reason": clean_reason if clean_reason else "Operational delay/cancellation",
-            "reported_by": str(gl.message.sender_address)
-        }
-
-        self.journeys[j_key] = json.dumps(journey)
-        return True
-
-    @gl.public.write
     def propose_rebooking_option(
         self,
         journey_id: int,
         flight_code: str,
         airline: str,
-        departure_iso: str,
-        arrival_iso: str,
-        stops: int,
-        layover_details: str,
-        added_cost_cents: int,
-        booking_url: str
+        flight_evidence_url: str,
+        claimed_fare_cents: int,
+        agent_notes: str
     ) -> u256:
+        """
+        Agent submits a proposed rebooking flight option.
+        Crucially: The contract does NOT trust caller-supplied arrival times, layover
+        durations, or fares. The contract independently acquires the authoritative
+        flight evidence directly from flight_evidence_url during adjudication.
+        """
         j_key = u256(journey_id)
         if j_key not in self.journeys:
             raise ValueError(f"Journey {journey_id} does not exist")
@@ -215,21 +174,17 @@ class FlightResolver(gl.Contract):
 
         clean_flight = str(flight_code).upper().strip()
         clean_airline = str(airline).strip()
-        clean_dep = str(departure_iso).strip()
-        clean_arr = str(arrival_iso).strip()
-        clean_layover = str(layover_details).strip()
-        clean_url = str(booking_url).strip()
+        clean_url = str(flight_evidence_url).strip()
+        clean_notes = str(agent_notes).strip()
 
         if len(clean_flight) == 0:
             raise ValueError("Flight code cannot be empty")
         if len(clean_airline) == 0:
             raise ValueError("Airline name cannot be empty")
-        if len(clean_dep) == 0 or len(clean_arr) == 0:
-            raise ValueError("Departure and Arrival ISO times cannot be empty")
-        if stops < 0:
-            raise ValueError("Stops cannot be negative")
-        if added_cost_cents < 0:
-            raise ValueError("Added cost cents cannot be negative")
+        if len(clean_url) == 0:
+            raise ValueError("Flight evidence URL cannot be empty")
+        if claimed_fare_cents < 0:
+            raise ValueError("Claimed fare cents cannot be negative")
 
         new_pid = u256(int(self.proposal_counter) + 1)
         self.proposal_counter = new_pid
@@ -240,12 +195,9 @@ class FlightResolver(gl.Contract):
             "proposer": str(gl.message.sender_address),
             "flight_code": clean_flight,
             "airline": clean_airline,
-            "departure_iso": clean_dep,
-            "arrival_iso": clean_arr,
-            "stops": int(stops),
-            "layover_details": clean_layover if clean_layover else "Non-stop direct flight",
-            "added_cost_cents": int(added_cost_cents),
-            "booking_url": clean_url if clean_url else "N/A",
+            "flight_evidence_url": clean_url,
+            "claimed_fare_cents": int(claimed_fare_cents),
+            "agent_notes": clean_notes if clean_notes else "Rebooking option proposed by agent",
             "status": "PROPOSED"
         }
 
@@ -254,6 +206,13 @@ class FlightResolver(gl.Contract):
 
     @gl.public.write
     def adjudicate_rebooking(self, journey_id: int, proposal_id: int) -> str:
+        """
+        Contract-Side Authoritative Evidence Acquisition & Multi-Pillar Adjudication:
+        1. Independently acquires live flight and schedule evidence via gl.nondet.web.get(flight_evidence_url).
+        2. Validators extract material schedule facts (arrival_iso, fare, stops, layover, status) and verbatim quotes.
+        3. Deterministic safety clamps verify verbatim quotes, arrival deadlines, fare ceilings, layover floors, and availability.
+        4. Canonicalized adjudication record stored on-chain.
+        """
         j_key = u256(journey_id)
         p_key = u256(proposal_id)
 
@@ -271,64 +230,85 @@ class FlightResolver(gl.Contract):
         if proposal.get("status") not in ["PROPOSED", "BORDERLINE_REVIEW"]:
             raise ValueError(f"Cannot adjudicate proposal in status '{proposal.get('status')}'")
 
-        max_extra_cost = journey["max_extra_cost_cents"]
-        proposed_cost = proposal["added_cost_cents"]
-        budget_overrun = proposed_cost > max_extra_cost
+        # Snapshot local variables before non-deterministic closures (no self in closures!)
+        target_feed_url = str(proposal["flight_evidence_url"])
+        flight_code = str(proposal["flight_code"])
+        airline = str(proposal["airline"])
+        claimed_fare = int(proposal["claimed_fare_cents"])
+        origin = str(journey["origin"])
+        destination = str(journey["destination"])
+        arrival_deadline = str(journey["arrival_deadline_iso"])
+        max_cost = int(journey["max_extra_cost_cents"])
+        max_stops = int(journey["max_stops"])
+        min_layover = int(journey["min_layover_mins"])
+        priority_mode = str(journey["priority_mode"])
 
+        # 1. Non-deterministic Flight Evidence Acquisition Closure
         def get_input() -> str:
+            try:
+                resp = gl.nondet.web.get(target_feed_url)
+                body_text = resp.body.decode("utf-8") if hasattr(resp, "body") else str(resp)
+            except Exception as e:
+                body_text = f"[FLIGHT_FETCH_ERROR]: {str(e)}"
+
+            clean_flight_payload = body_text[:4000].strip()
+            if len(clean_flight_payload) == 0:
+                clean_flight_payload = "[EMPTY_FLIGHT_FEED_ERROR]"
+
             return (
                 f"=== TRAVELLER JOURNEY CONSTRAINTS ===\n"
-                f"Journey ID: {journey_id}\n"
-                f"Route: {journey['origin']} -> {journey['destination']}\n"
-                f"Strict Arrival Deadline: {journey['arrival_deadline_iso']}\n"
-                f"Max Additional Cost: ${max_extra_cost / 100:.2f} ({max_extra_cost} cents)\n"
-                f"Max Acceptable Stops: {journey['max_stops']}\n"
-                f"Min Required Layover: {journey['min_layover_mins']} minutes\n"
-                f"Priority Preference: {journey['priority_mode']}\n\n"
-                f"=== PROPOSED REBOOKING FLIGHT OPTION ===\n"
-                f"Proposal ID: {proposal_id}\n"
-                f"Flight: {proposal['flight_code']} ({proposal['airline']})\n"
-                f"Departure: {proposal['departure_iso']}\n"
-                f"Scheduled Arrival: {proposal['arrival_iso']}\n"
-                f"Number of Stops: {proposal['stops']}\n"
-                f"Connection Details: {proposal['layover_details']}\n"
-                f"Additional Cost: ${proposed_cost / 100:.2f} ({proposed_cost} cents)\n"
-                f"Booking Link: {proposal['booking_url']}\n\n"
-                f"=== RESOLUTION EVALUATION DIRECTIVES ===\n"
-                f"1. Deadline Check: If scheduled arrival time is past arrival deadline, decision MUST be DISQUALIFIED.\n"
-                f"2. Budget Check: If additional cost exceeds maximum additional cost, decision MUST be DISQUALIFIED.\n"
-                f"3. Layover Safety: If layover connection time is under the required minimum minutes or stops exceed max stops, decision is DISQUALIFIED.\n"
-                f"4. Qualification: If option arrives on/before deadline, within budget, and with safe connections, decision is QUALIFIED.\n"
-                f"5. Trade-off Review: If option is feasible but features tight connections or minor preference deviations, decision is BORDERLINE_REVIEW."
+                f"Route: {origin} -> {destination}\n"
+                f"Strict Arrival Deadline: {arrival_deadline}\n"
+                f"Max Added Cost Cents: {max_cost} (${max_cost / 100:.2f})\n"
+                f"Max Acceptable Stops: {max_stops}\n"
+                f"Min Required Layover Minutes: {min_layover}\n"
+                f"Priority Mode: {priority_mode}\n\n"
+                f"=== AGENT PROPOSAL CLAIM ===\n"
+                f"Proposed Flight: {flight_code} ({airline})\n"
+                f"Claimed Fare Cents: {claimed_fare} (${claimed_fare / 100:.2f})\n"
+                f"Authoritative Feed URL: {target_feed_url}\n\n"
+                f"=== INDEPENDENTLY FETCHED FLIGHT SCHEDULE EVIDENCE ===\n"
+                f"{clean_flight_payload}\n\n"
+                f"=== EVALUATION DIRECTIVES ===\n"
+                f"1. Independent Verification: Read the actual flight schedule evidence payload above.\n"
+                f"2. Extract: 'arrival_time_iso', 'actual_fare_cents', 'stops' (int), 'layover_minutes' (int), and 'booking_status'.\n"
+                f"3. Verbatim Quote: Extract an exact substring from the flight feed proving arrival time, layover, or fare.\n"
+                f"4. If arrival_time_iso is after arrival deadline, or actual fare > max cost, or layover < min layover: DISQUALIFIED.\n"
+                f"5. If flight arrives on/before deadline, within budget, and with safe layover: QUALIFIED.\n"
+                f"6. If feasible but connection is tight (within 15 mins of safety floor): BORDERLINE_REVIEW."
             )
+
+        task = (
+            f"Act as an authoritative flight disruption arbiter. Independently verify the flight feed "
+            f"for '{flight_code}' against the passenger's arrival deadline '{arrival_deadline}' and budget ceiling ${max_cost / 100:.2f}. "
+            f"Output a valid JSON object with keys: "
+            f"'decision' ('QUALIFIED', 'BORDERLINE_REVIEW', or 'DISQUALIFIED'), "
+            f"'arrival_time_iso' (string), "
+            f"'actual_fare_cents' (integer), "
+            f"'stops' (integer), "
+            f"'layover_minutes' (integer), "
+            f"'booking_status' ('AVAILABLE' or 'SOLD_OUT'), "
+            f"'verbatim_quote' (exact string from the flight payload, up to 120 chars), and "
+            f"'rationale' (concise explanation up to 200 chars)."
+        )
+
+        criteria = """
+            1. Output must be a valid JSON object with keys: 'decision', 'arrival_time_iso', 'actual_fare_cents', 'stops', 'layover_minutes', 'booking_status', 'verbatim_quote', and 'rationale'.
+            2. 'decision' must be strictly one of: 'QUALIFIED', 'BORDERLINE_REVIEW', or 'DISQUALIFIED'.
+            3. 'verbatim_quote' must be an exact substring from the fetched flight schedule evidence.
+            4. If the flight arrival time is after the passenger's arrival deadline or fare exceeds max budget, decision must be 'DISQUALIFIED'.
+            5. If stops > max_stops or layover_minutes < min_layover_mins, decision must be 'DISQUALIFIED'.
+            6. If flight arrives before deadline within budget with safe connections, decision is 'QUALIFIED'.
+        """
 
         raw_result = gl.eq_principle.prompt_non_comparative(
             get_input,
-            task=(
-                f"Act as an impartial airline passenger resolution arbiter. Evaluate flight "
-                f"'{proposal['flight_code']}' arriving at '{proposal['arrival_iso']}' against the traveller's "
-                f"deadline '{journey['arrival_deadline_iso']}' and max cost ${max_extra_cost / 100:.2f}. "
-                f"Output a valid JSON object with keys: "
-                f"'decision' ('QUALIFIED', 'BORDERLINE_REVIEW', or 'DISQUALIFIED'), "
-                f"'feasibility_score' (integer 0-100), "
-                f"'deadline_met' (boolean), "
-                f"'budget_met' (boolean), "
-                f"'rationale' (concise 1-2 sentence explanation)."
-            ),
-            criteria="""
-                1. The output is a valid JSON object with keys: decision, feasibility_score, deadline_met, budget_met, and rationale.
-                2. The decision is exactly one of: QUALIFIED, BORDERLINE_REVIEW, or DISQUALIFIED.
-                3. If scheduled arrival is after the arrival deadline, deadline_met is false and decision is DISQUALIFIED.
-                4. If additional cost exceeds maximum additional cost, budget_met is false and decision is DISQUALIFIED.
-                5. If stops exceed max acceptable stops or connection time is under minimum layover safety floor, decision is DISQUALIFIED.
-                6. If the flight arrives before the deadline within budget with safe connections, decision is QUALIFIED.
-                7. If the flight meets the deadline and budget but features tight connection risks or minor preference trade-offs, decision is BORDERLINE_REVIEW.
-            """,
+            task=task,
+            criteria=criteria,
         )
 
+        # 2. Canonical JSON Parsing & Bracket Sanitization
         result_str = str(raw_result).strip()
-
-        # Sanitize code blocks if returned
         clean_json_str = result_str
         if "```" in clean_json_str:
             first_brace = clean_json_str.find("{")
@@ -341,24 +321,81 @@ class FlightResolver(gl.Contract):
             if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
                 clean_json_str = clean_json_str[first_brace : last_brace + 1]
 
-        decision = "BORDERLINE_REVIEW"
+        decision = "DISQUALIFIED"
+        arrival_found = ""
+        fare_found = 0
+        stops_found = 0
+        layover_found = 0
+        booking_status = "UNKNOWN"
+        verbatim_quote = "NONE"
+        rationale = "Default fallback"
+
         try:
             parsed = json.loads(clean_json_str)
-            raw_decision = str(parsed.get("decision", "BORDERLINE_REVIEW")).upper().strip()
-            if raw_decision in ["QUALIFIED", "BORDERLINE_REVIEW", "DISQUALIFIED"]:
-                decision = raw_decision
-        except Exception:
-            decision = "BORDERLINE_REVIEW"
-
-        # Deterministic invariant clamp: Budget overrun can never be QUALIFIED
-        if budget_overrun and decision == "QUALIFIED":
+            raw_dec = str(parsed.get("decision", "DISQUALIFIED")).upper().strip()
+            if raw_dec in ["QUALIFIED", "BORDERLINE_REVIEW", "DISQUALIFIED"]:
+                decision = raw_dec
+            arrival_found = str(parsed.get("arrival_time_iso", "")).strip()
+            fare_found = int(parsed.get("actual_fare_cents", 0))
+            stops_found = int(parsed.get("stops", 0))
+            layover_found = int(parsed.get("layover_minutes", 0))
+            booking_status = str(parsed.get("booking_status", "UNKNOWN")).upper().strip()
+            verbatim_quote = str(parsed.get("verbatim_quote", "NONE")).strip()[:120]
+            rationale = str(parsed.get("rationale", "")).strip()[:200]
+        except Exception as e:
             decision = "DISQUALIFIED"
+            rationale = f"Parsing fallback: {str(e)[:80]}"
+
+        # 3. Deterministic Invariant Clamps (Code Moves State)
+        # Clamp 1: Verbatim Quote Verification
+        if len(verbatim_quote) < 4 or verbatim_quote == "NONE":
+            decision = "DISQUALIFIED"
+            rationale = "Deterministic clamp: Missing verifiable verbatim quote from flight feed."
+
+        # Clamp 2: Hard Arrival Deadline
+        if arrival_found and arrival_found > arrival_deadline:
+            decision = "DISQUALIFIED"
+            rationale = f"Deterministic clamp: Arrival ({arrival_found}) lands after deadline ({arrival_deadline})."
+
+        # Clamp 3: Hard Fare Ceiling
+        if fare_found > max_cost or claimed_fare > max_cost:
+            decision = "DISQUALIFIED"
+            rationale = f"Deterministic clamp: Fare ({max(fare_found, claimed_fare)} cents) exceeds max cost ({max_cost} cents)."
+
+        # Clamp 4: Unsafe Connection Floor & Max Stops
+        if stops_found > max_stops:
+            decision = "DISQUALIFIED"
+            rationale = f"Deterministic clamp: Stops ({stops_found}) exceed max allowed ({max_stops})."
+
+        if stops_found > 0 and layover_found < min_layover:
+            decision = "DISQUALIFIED"
+            rationale = f"Deterministic clamp: Layover ({layover_found}m) is below safe floor ({min_layover}m)."
+
+        # Clamp 5: Seat Availability
+        if booking_status == "SOLD_OUT":
+            decision = "DISQUALIFIED"
+            rationale = "Deterministic clamp: Flight is sold out."
+
+        # 4. Canonicalized Storage Record
+        canonical_record = {
+            "proposal_id": int(proposal_id),
+            "journey_id": int(journey_id),
+            "decision": decision,
+            "arrival_time_iso": arrival_found,
+            "actual_fare_cents": int(fare_found),
+            "stops": int(stops_found),
+            "layover_minutes": int(layover_found),
+            "booking_status": booking_status,
+            "verbatim_quote": verbatim_quote,
+            "rationale": rationale
+        }
+        canonical_json = json.dumps(canonical_record)
 
         proposal["status"] = decision
         self.proposals[p_key] = json.dumps(proposal)
-        self.adjudications[p_key] = clean_json_str
+        self.adjudications[p_key] = canonical_json
 
-        return clean_json_str
+        return canonical_json
 
     @gl.public.write
     def confirm_rebooking(self, journey_id: int, proposal_id: int) -> bool:

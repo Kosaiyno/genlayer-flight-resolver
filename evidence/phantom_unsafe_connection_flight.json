@@ -1,0 +1,16 @@
+{
+  "flight_number": "AF1128",
+  "airline": "Air France",
+  "origin_airport": "LHR",
+  "destination_airport": "JFK",
+  "departure_time_iso": "2026-11-05T12:30:00Z",
+  "arrival_time_iso": "2026-11-05T17:45:00Z",
+  "flight_type": "CONNECTING",
+  "stops": 1,
+  "connecting_airport": "CDG",
+  "layover_minutes": 25,
+  "fare_cents": 18000,
+  "currency": "USD",
+  "booking_status": "AVAILABLE",
+  "authoritative_feed": "GLOBAL_FLIGHT_REGISTRY_GDS_CERTIFIED"
+}

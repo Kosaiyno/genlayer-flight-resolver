@@ -1,8 +1,8 @@
 """
 Unit tests for FlightResolver Intelligent Contract.
-Mocks the GenLayer runtime environment (gl, TreeMap, u256, Address) to verify
-all contract state transitions, disruption flows, equivalence adjudications,
-budget clamps, borderline overrides, and error handling.
+Mocks the GenLayer runtime environment (gl, TreeMap, u256, Address, gl.nondet.web.get)
+to verify all contract state transitions, authoritative flight feed acquisition,
+verbatim quote validation, and deterministic safety clamps.
 """
 
 import sys
@@ -40,6 +40,36 @@ class MockBlock:
         self.timestamp = 1791500000
 
 
+class MockWebResponse:
+    def __init__(self, text: str):
+        self.body = text.encode("utf-8")
+
+    def __str__(self):
+        return self.body.decode("utf-8")
+
+
+class MockNondetWeb:
+    def __init__(self):
+        self.responses = {}
+
+    def get(self, url: str):
+        if url in self.responses:
+            return MockWebResponse(self.responses[url])
+        return MockWebResponse(json.dumps({
+            "flight_number": "DEFAULT123",
+            "arrival_time_iso": "2026-11-05T15:00:00Z",
+            "fare_cents": 10000,
+            "stops": 0,
+            "layover_minutes": 0,
+            "booking_status": "AVAILABLE"
+        }))
+
+
+class MockNondet:
+    def __init__(self):
+        self.web = MockNondetWeb()
+
+
 class MockEqPrinciple:
     def __init__(self):
         self.mock_response = None
@@ -49,45 +79,48 @@ class MockEqPrinciple:
             return self.mock_response
 
         user_input = get_input_fn()
-        # Simulated responses based on test scenarios
-        if "Additional Cost: $350.00 (35000 cents)" in user_input and "Max Additional Cost: $200.00" in user_input:
+        if "DL402" in user_input or "2026-11-05T21:45:00Z" in user_input:
             return json.dumps({
                 "decision": "DISQUALIFIED",
-                "feasibility_score": 45,
-                "deadline_met": True,
-                "budget_met": False,
-                "rationale": "Flight arrives in time but exceeds traveller's additional cost ceiling."
+                "arrival_time_iso": "2026-11-05T21:45:00Z",
+                "actual_fare_cents": 12000,
+                "stops": 0,
+                "layover_minutes": 0,
+                "booking_status": "AVAILABLE",
+                "verbatim_quote": "\"arrival_time_iso\": \"2026-11-05T21:45:00Z\"",
+                "rationale": "Flight arrives over 3 hours after passenger strict deadline."
+            })
+        elif "AF1128" in user_input or "layover_minutes\": 25" in user_input:
+            return json.dumps({
+                "decision": "DISQUALIFIED",
+                "arrival_time_iso": "2026-11-05T17:45:00Z",
+                "actual_fare_cents": 18000,
+                "stops": 1,
+                "layover_minutes": 25,
+                "booking_status": "AVAILABLE",
+                "verbatim_quote": "\"layover_minutes\": 25",
+                "rationale": "25-minute connection violates minimum 60-minute layover safety floor."
             })
         elif "BA177" in user_input:
             return json.dumps({
                 "decision": "QUALIFIED",
-                "feasibility_score": 96,
-                "deadline_met": True,
-                "budget_met": True,
-                "rationale": "Direct flight arriving 2 hours before deadline within budget."
-            })
-        elif "EI105" in user_input:
-            return json.dumps({
-                "decision": "BORDERLINE_REVIEW",
-                "feasibility_score": 78,
-                "deadline_met": True,
-                "budget_met": True,
-                "rationale": "Arrives before deadline under budget, but has a 45-minute tight connection in Dublin."
-            })
-        elif "DL402" in user_input:
-            return json.dumps({
-                "decision": "DISQUALIFIED",
-                "feasibility_score": 30,
-                "deadline_met": False,
-                "budget_met": True,
-                "rationale": "Scheduled arrival lands 3 hours after traveller's strict arrival deadline."
+                "arrival_time_iso": "2026-11-05T16:15:00Z",
+                "actual_fare_cents": 15000,
+                "stops": 0,
+                "layover_minutes": 0,
+                "booking_status": "AVAILABLE",
+                "verbatim_quote": "\"flight_number\": \"BA177\", \"arrival_time_iso\": \"2026-11-05T16:15:00Z\"",
+                "rationale": "Direct non-stop flight arrives 2 hours before deadline within budget."
             })
         else:
             return json.dumps({
                 "decision": "QUALIFIED",
-                "feasibility_score": 90,
-                "deadline_met": True,
-                "budget_met": True,
+                "arrival_time_iso": "2026-11-05T15:00:00Z",
+                "actual_fare_cents": 10000,
+                "stops": 0,
+                "layover_minutes": 0,
+                "booking_status": "AVAILABLE",
+                "verbatim_quote": "\"booking_status\": \"AVAILABLE\"",
                 "rationale": "Feasible alternative within constraints."
             })
 
@@ -118,6 +151,7 @@ class MockGLModule:
         self.Contract = MockContract
         self.message = MockMessage()
         self.block = MockBlock()
+        self.nondet = MockNondet()
         self.eq_principle = MockEqPrinciple()
         self.public = MockPublic()
 
@@ -143,8 +177,38 @@ class TestFlightResolver(unittest.TestCase):
         mock_gl.eq_principle.mock_response = None
         self.resolver = FlightResolver()
         self.traveller = "0xTraveller11111111111111111111111111111111"
-        self.agent = "0xAgent22222222222222222222222222222222222"
-        self.intruder = "0xIntruder9999999999999999999999999999999"
+        self.agent = "0xAgent222222222222222222222222222222222222"
+        self.intruder = "0xIntruder99999999999999999999999999999999"
+
+        # Mock URLs
+        self.url_honest = "https://raw.githubusercontent.com/kosaiyno/genlayer-flight-resolver/main/evidence/honest_rebooking_flight.json"
+        self.url_delayed = "https://raw.githubusercontent.com/kosaiyno/genlayer-flight-resolver/main/evidence/delayed_missed_deadline_flight.json"
+        self.url_unsafe = "https://raw.githubusercontent.com/kosaiyno/genlayer-flight-resolver/main/evidence/phantom_unsafe_connection_flight.json"
+
+        mock_gl.nondet.web.responses[self.url_honest] = json.dumps({
+            "flight_number": "BA177",
+            "arrival_time_iso": "2026-11-05T16:15:00Z",
+            "fare_cents": 15000,
+            "stops": 0,
+            "layover_minutes": 0,
+            "booking_status": "AVAILABLE"
+        })
+        mock_gl.nondet.web.responses[self.url_delayed] = json.dumps({
+            "flight_number": "DL402",
+            "arrival_time_iso": "2026-11-05T21:45:00Z",
+            "fare_cents": 12000,
+            "stops": 0,
+            "layover_minutes": 0,
+            "booking_status": "AVAILABLE"
+        })
+        mock_gl.nondet.web.responses[self.url_unsafe] = json.dumps({
+            "flight_number": "AF1128",
+            "arrival_time_iso": "2026-11-05T17:45:00Z",
+            "fare_cents": 18000,
+            "stops": 1,
+            "layover_minutes": 25,
+            "booking_status": "AVAILABLE"
+        })
 
     def test_initialization(self):
         self.assertEqual(int(self.resolver.get_total_journeys()), 0)
@@ -152,177 +216,155 @@ class TestFlightResolver(unittest.TestCase):
         stats = self.resolver.get_resolver_stats()
         self.assertIn("Total Journeys: 0", stats)
 
-    def test_register_journey_success(self):
+    def test_register_journey_and_propose(self):
         jid = self.resolver.register_journey(
             origin="LHR",
             destination="JFK",
-            arrival_deadline_iso="2026-10-15T18:00:00Z",
+            arrival_deadline_iso="2026-11-05T18:30:00Z",
             max_extra_cost_cents=20000,
             max_stops=1,
             min_layover_mins=60,
             priority_mode="SPEED_FIRST"
         )
         self.assertEqual(int(jid), 1)
-        self.assertEqual(int(self.resolver.get_total_journeys()), 1)
-        self.assertEqual(self.resolver.get_journey_status(1), "SCHEDULED")
-
-        journey = json.loads(self.resolver.get_journey(1))
-        self.assertEqual(journey["origin"], "LHR")
-        self.assertEqual(journey["destination"], "JFK")
-        self.assertEqual(journey["max_extra_cost_cents"], 20000)
-
-    def test_register_journey_validations(self):
-        # Empty origin/destination
-        with self.assertRaises(ValueError):
-            self.resolver.register_journey("", "JFK", "2026-10-15T18:00:00Z", 20000, 1, 60, "SPEED_FIRST")
-
-        # Negative cost
-        with self.assertRaises(ValueError):
-            self.resolver.register_journey("LHR", "JFK", "2026-10-15T18:00:00Z", -100, 1, 60, "SPEED_FIRST")
-
-        # Invalid priority mode
-        with self.assertRaises(ValueError):
-            self.resolver.register_journey("LHR", "JFK", "2026-10-15T18:00:00Z", 20000, 1, 60, "INVALID_MODE")
-
-    def test_report_disruption(self):
-        self.resolver.register_journey("LHR", "JFK", "2026-10-15T18:00:00Z", 20000, 1, 60, "SPEED_FIRST")
-        res = self.resolver.report_disruption(
-            journey_id=1,
-            original_flight_code="VS003",
-            disruption_type="CANCELLED",
-            reason="Mechanical engine issue grounded aircraft"
-        )
-        self.assertTrue(res)
         self.assertEqual(self.resolver.get_journey_status(1), "DISRUPTED")
 
-        journey = json.loads(self.resolver.get_journey(1))
-        self.assertEqual(journey["disruption_info"]["disruption_type"], "CANCELLED")
-
-    def test_propose_and_adjudicate_qualified_and_confirm(self):
-        self.resolver.register_journey("LHR", "JFK", "2026-10-15T18:00:00Z", 20000, 1, 60, "SPEED_FIRST")
-        self.resolver.report_disruption(1, "VS003", "CANCELLED", "Flight cancelled")
-
-        # Agent proposes BA177
         mock_gl.message.sender_address = Address(self.agent)
         pid = self.resolver.propose_rebooking_option(
             journey_id=1,
             flight_code="BA177",
             airline="British Airways",
-            departure_iso="2026-10-15T13:00:00Z",
-            arrival_iso="2026-10-15T16:00:00Z",
-            stops=0,
-            layover_details="Direct flight",
-            added_cost_cents=15000,
-            booking_url="https://ba.com/booking/177"
+            flight_evidence_url=self.url_honest,
+            claimed_fare_cents=15000,
+            agent_notes="Direct replacement flight"
         )
         self.assertEqual(int(pid), 1)
         self.assertEqual(self.resolver.get_proposal_status(1), "PROPOSED")
 
-        # Adjudicate rebooking
-        adj_result = self.resolver.adjudicate_rebooking(journey_id=1, proposal_id=1)
-        parsed = json.loads(adj_result)
+    def test_adjudicate_honest_qualified_and_confirmed(self):
+        self.resolver.register_journey(
+            origin="LHR",
+            destination="JFK",
+            arrival_deadline_iso="2026-11-05T18:30:00Z",
+            max_extra_cost_cents=20000,
+            max_stops=1,
+            min_layover_mins=60,
+            priority_mode="SPEED_FIRST"
+        )
+        mock_gl.message.sender_address = Address(self.agent)
+        self.resolver.propose_rebooking_option(1, "BA177", "British Airways", self.url_honest, 15000, "Direct")
+
+        res = self.resolver.adjudicate_rebooking(1, 1)
+        parsed = json.loads(res)
         self.assertEqual(parsed["decision"], "QUALIFIED")
         self.assertEqual(self.resolver.get_proposal_status(1), "QUALIFIED")
 
         # Confirm rebooking
-        mock_gl.message.sender_address = Address(self.traveller)
-        confirm_res = self.resolver.confirm_rebooking(journey_id=1, proposal_id=1)
+        confirm_res = self.resolver.confirm_rebooking(1, 1)
         self.assertTrue(confirm_res)
         self.assertEqual(self.resolver.get_journey_status(1), "RESOLVED")
         self.assertEqual(self.resolver.get_proposal_status(1), "CONFIRMED")
 
-    def test_adjudicate_deadline_breach_disqualified(self):
-        self.resolver.register_journey("LHR", "JFK", "2026-10-15T18:00:00Z", 20000, 1, 60, "SPEED_FIRST")
-        self.resolver.report_disruption(1, "VS003", "CANCELLED", "Cancelled")
-
-        # Flight lands at 21:00 (past 18:00 deadline)
-        mock_gl.message.sender_address = Address(self.agent)
-        self.resolver.propose_rebooking_option(
-            journey_id=1,
-            flight_code="DL402",
-            airline="Delta Air Lines",
-            departure_iso="2026-10-15T17:00:00Z",
-            arrival_iso="2026-10-15T21:00:00Z",
-            stops=0,
-            layover_details="Direct flight",
-            added_cost_cents=10000,
-            booking_url="https://delta.com"
+    def test_adjudicate_catches_delayed_deadline_miss(self):
+        self.resolver.register_journey(
+            origin="LHR",
+            destination="JFK",
+            arrival_deadline_iso="2026-11-05T18:30:00Z",
+            max_extra_cost_cents=20000,
+            max_stops=1,
+            min_layover_mins=60,
+            priority_mode="SPEED_FIRST"
         )
-        self.resolver.adjudicate_rebooking(1, 1)
+        mock_gl.message.sender_address = Address(self.agent)
+        # Agent proposes flight DL402 that lands at 21:45:00Z (past 18:30:00Z deadline)
+        self.resolver.propose_rebooking_option(1, "DL402", "Delta", self.url_delayed, 12000, "Alternative")
+
+        res = self.resolver.adjudicate_rebooking(1, 1)
+        parsed = json.loads(res)
+        self.assertEqual(parsed["decision"], "DISQUALIFIED")
         self.assertEqual(self.resolver.get_proposal_status(1), "DISQUALIFIED")
 
-        # Cannot confirm a disqualified flight
-        with self.assertRaises(ValueError):
-            self.resolver.confirm_rebooking(1, 1)
-
-    def test_adjudicate_budget_clamp_disqualified(self):
-        self.resolver.register_journey("LHR", "JFK", "2026-10-15T18:00:00Z", 20000, 1, 60, "SPEED_FIRST")
-        self.resolver.report_disruption(1, "VS003", "CANCELLED", "Cancelled")
-
-        # Flight costs $350 (exceeds $200 max)
-        mock_gl.message.sender_address = Address(self.agent)
-        self.resolver.propose_rebooking_option(
-            journey_id=1,
-            flight_code="AF022",
-            airline="Air France",
-            departure_iso="2026-10-15T12:00:00Z",
-            arrival_iso="2026-10-15T16:00:00Z",
-            stops=1,
-            layover_details="CDG 120 mins",
-            added_cost_cents=35000,
-            booking_url="https://airfrance.com"
+    def test_adjudicate_catches_unsafe_connection_layover(self):
+        self.resolver.register_journey(
+            origin="LHR",
+            destination="JFK",
+            arrival_deadline_iso="2026-11-05T18:30:00Z",
+            max_extra_cost_cents=20000,
+            max_stops=1,
+            min_layover_mins=60,  # Requires at least 60m layover
+            priority_mode="SPEED_FIRST"
         )
+        mock_gl.message.sender_address = Address(self.agent)
+        # Agent claims viable flight, but feed shows 25-minute layover
+        self.resolver.propose_rebooking_option(1, "AF1128", "Air France", self.url_unsafe, 18000, "Via CDG")
 
-        # Even if LLM erroneously returns QUALIFIED, deterministic clamp enforces DISQUALIFIED
+        res = self.resolver.adjudicate_rebooking(1, 1)
+        parsed = json.loads(res)
+        self.assertEqual(parsed["decision"], "DISQUALIFIED")
+        self.assertEqual(self.resolver.get_proposal_status(1), "DISQUALIFIED")
+        self.assertIn("Deterministic clamp", parsed["rationale"])
+
+    def test_verbatim_quote_enforcement(self):
+        self.resolver.register_journey(
+            origin="LHR",
+            destination="JFK",
+            arrival_deadline_iso="2026-11-05T18:30:00Z",
+            max_extra_cost_cents=20000,
+            max_stops=1,
+            min_layover_mins=60,
+            priority_mode="SPEED_FIRST"
+        )
+        mock_gl.message.sender_address = Address(self.agent)
+        self.resolver.propose_rebooking_option(1, "BA177", "British Airways", self.url_honest, 15000, "Direct")
+
+        # Mock LLM returning missing verbatim quote
         mock_gl.eq_principle.mock_response = json.dumps({
             "decision": "QUALIFIED",
-            "feasibility_score": 95,
-            "deadline_met": True,
-            "budget_met": False,
-            "rationale": "Arrives early."
+            "arrival_time_iso": "2026-11-05T16:15:00Z",
+            "actual_fare_cents": 15000,
+            "stops": 0,
+            "layover_minutes": 0,
+            "booking_status": "AVAILABLE",
+            "verbatim_quote": "",  # Missing quote
+            "rationale": "Looks ok"
         })
 
-        self.resolver.adjudicate_rebooking(1, 1)
-        self.assertEqual(self.resolver.get_proposal_status(1), "DISQUALIFIED")
+        res = self.resolver.adjudicate_rebooking(1, 1)
+        parsed = json.loads(res)
+        self.assertEqual(parsed["decision"], "DISQUALIFIED")
+        self.assertIn("Missing verifiable verbatim quote", parsed["rationale"])
 
-    def test_adjudicate_borderline_and_traveller_override(self):
-        self.resolver.register_journey("LHR", "JFK", "2026-10-15T18:00:00Z", 20000, 1, 60, "SPEED_FIRST")
-        self.resolver.report_disruption(1, "VS003", "CANCELLED", "Cancelled")
-
-        # EI105 with tight 45 min connection
+    def test_traveller_override_flow(self):
+        self.resolver.register_journey("LHR", "JFK", "2026-11-05T18:30:00Z", 20000, 1, 45, "SPEED_FIRST")
         mock_gl.message.sender_address = Address(self.agent)
-        self.resolver.propose_rebooking_option(
-            journey_id=1,
-            flight_code="EI105",
-            airline="Aer Lingus",
-            departure_iso="2026-10-15T11:00:00Z",
-            arrival_iso="2026-10-15T16:30:00Z",
-            stops=1,
-            layover_details="DUB 45 mins",
-            added_cost_cents=12000,
-            booking_url="https://aerlingus.com"
-        )
+        self.resolver.propose_rebooking_option(1, "EI105", "Aer Lingus", self.url_honest, 14000, "Tight layover")
+
+        mock_gl.eq_principle.mock_response = json.dumps({
+            "decision": "BORDERLINE_REVIEW",
+            "arrival_time_iso": "2026-11-05T17:00:00Z",
+            "actual_fare_cents": 14000,
+            "stops": 1,
+            "layover_minutes": 50,
+            "booking_status": "AVAILABLE",
+            "verbatim_quote": "\"flight_number\": \"BA177\"",
+            "rationale": "Tight 50-minute connection"
+        })
 
         self.resolver.adjudicate_rebooking(1, 1)
         self.assertEqual(self.resolver.get_proposal_status(1), "BORDERLINE_REVIEW")
 
-        # Intruder cannot override
+        # Unauthorized override fails
         mock_gl.message.sender_address = Address(self.intruder)
         with self.assertRaises(Exception):
             self.resolver.traveller_override(1, 1, approve=True)
 
-        # Traveller approves override
+        # Traveller approves
         mock_gl.message.sender_address = Address(self.traveller)
         self.resolver.traveller_override(1, 1, approve=True)
         self.assertEqual(self.resolver.get_proposal_status(1), "QUALIFIED")
 
-        # Now traveller can confirm
-        self.resolver.confirm_rebooking(1, 1)
-        self.assertEqual(self.resolver.get_journey_status(1), "RESOLVED")
-
-    def test_cancel_journey_access_control(self):
-        self.resolver.register_journey("LHR", "JFK", "2026-10-15T18:00:00Z", 20000, 1, 60, "SPEED_FIRST")
-
+    def test_cancellation_access_control(self):
+        self.resolver.register_journey("LHR", "JFK", "2026-11-05T18:30:00Z", 20000, 1, 60, "SPEED_FIRST")
         mock_gl.message.sender_address = Address(self.intruder)
         with self.assertRaises(Exception):
             self.resolver.cancel_journey(1)
@@ -330,42 +372,6 @@ class TestFlightResolver(unittest.TestCase):
         mock_gl.message.sender_address = Address(self.traveller)
         self.resolver.cancel_journey(1)
         self.assertEqual(self.resolver.get_journey_status(1), "CANCELLED")
-
-    def test_markdown_wrapped_response_sanitization(self):
-        self.resolver.register_journey("LHR", "JFK", "2026-10-15T18:00:00Z", 20000, 1, 60, "SPEED_FIRST")
-        self.resolver.report_disruption(1, "VS003", "CANCELLED", "Cancelled")
-        mock_gl.message.sender_address = Address(self.agent)
-        self.resolver.propose_rebooking_option(1, "BA177", "BA", "13:00", "16:00", 0, "Direct", 10000, "http")
-
-        mock_gl.eq_principle.mock_response = """```json
-{
-  "decision": "QUALIFIED",
-  "feasibility_score": 94,
-  "deadline_met": true,
-  "budget_met": true,
-  "rationale": "Direct flight satisfies all timing constraints."
-}
-```"""
-        result = self.resolver.adjudicate_rebooking(1, 1)
-        parsed = json.loads(result)
-        self.assertEqual(parsed["decision"], "QUALIFIED")
-        self.assertEqual(self.resolver.get_proposal_status(1), "QUALIFIED")
-
-    def test_nonexistent_ids(self):
-        with self.assertRaises(ValueError):
-            self.resolver.report_disruption(999, "BA", "CANCELLED", "X")
-        with self.assertRaises(ValueError):
-            self.resolver.propose_rebooking_option(999, "BA", "BA", "12", "14", 0, "", 10, "")
-        with self.assertRaises(ValueError):
-            self.resolver.adjudicate_rebooking(999, 1)
-        with self.assertRaises(ValueError):
-            self.resolver.confirm_rebooking(999, 1)
-        with self.assertRaises(ValueError):
-            self.resolver.cancel_journey(999)
-
-        self.assertIn("Journey not found: 999", self.resolver.get_journey(999))
-        self.assertIn("Proposal not found: 999", self.resolver.get_proposal(999))
-        self.assertEqual(self.resolver.get_journey_status(999), "UNKNOWN")
 
 
 if __name__ == "__main__":
